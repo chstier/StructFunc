@@ -1,0 +1,63 @@
+﻿annotation;class;metric;tags;modality;tags_plotting
+hill2010-devexp;cortical expansion;developmental cortical expansion;dev-expansion;MRI;dev-expansion
+hill2010-evoexp;cortical expansion;evolutionary expansion;ev-expansion ;MRI;ev-expansion 
+reardon2018-scalingnih;cortical expansion;cortical scaling development;cort-scaling;MRI;cort-scaling_nih
+reardon2018-scalingpnc;cortical expansion;cortical scaling development;cort-scaling;MRI;cort-scaling_pnc
+sydnor2021-SAaxis;gradient - summary;sensory-association mean rank axis;s-a-axis;mixed;s-a-axis
+satterthwaite2014-meancbf;metabolism;cerebral blood flow;cereb-bloodflow;ASL;cereb-bloodflow_s
+raichle-cbf;metabolism;cerebral blood flow;cereb-bloodflow;fMRI;cereb-bloodflow_r
+raichle-cbv;metabolism;cerebral blood volume;cereb-bloodvol;fMRI;cereb-bloodvol
+raichle-cmr02;metabolism;oxygen metabolism;oxygen;fMRI;oxygen
+raichle-cmrglc;metabolism;glucose metabolism;glucose;fMRI;glucose
+bb_gradient;microstructural;cytoarchitectonic feature;cyto-gradient;MRI;cyto-gradient
+bb_moment1;microstructural;cytoarchitectonic feature;cyto-intensity;MRI;cyto-intensity
+bb_moment2;microstructural;cytoarchitectonic feature;cyto-mean;MRI;cyto-mean
+bb_moment3;microstructural;cytoarchitectonic feature;cyto-sd;MRI;cyto-sd
+bb_moment4;microstructural;cytoarchitectonic feature;cyto-skewness;MRI;cyto-skewness
+bb_moment5;microstructural;cytoarchitectonic feature;cyto-kurtosis;MRI;cyto-kurtosis
+finnema2016-ucbj;microstructural;synaptic vesicle glycoprotein 2A ;SV2A;PET;SV2A
+hcps1200-myelinmap;microstructural;myelin;myelin;MRI;myelin
+hcps1200-thickness;microstructural;cortical thickness;thickness;MRI;thickness
+abagen-genepc1;microstructural - summary;pc1 gene expression;genepc1;;genepc1
+struct_hubs_hcp;network-metrics;structural hubs;struct-hub;MRI;struct-hub
+kim2020-ps13;neurotransmitter - enzyme;cyclooxygenase-1;COX-1;PET;COX-1
+wey2016-martinostat;neurotransmitter - enzyme;histone deacetylase (class 1, );HDAC;PET;HDAC
+lois2018-pbr28;neurotransmitter - proteine;translocator protein;TSPO;PET;TSPO
+beliveau2017-cimbi36;neurotransmitter - receptor;serotonin receptor;5-HT2a;PET;5-HT2a
+beliveau2017-sb207145;neurotransmitter - receptor;serotonin receptor;5-HT4;PET;5-HT4
+dubois2015-abp688;neurotransmitter - receptor;glutamate receptor;mGluR5;PET;mGluR5_d
+dukart2018-flumazenil;neurotransmitter - receptor;gaba receptor;GABAa;PET;GABAa_d
+gallezot2010-p943;neurotransmitter - receptor;serotonin receptor;5-HT1b;PET;5-HT1b
+gallezot2017-gsk189254;neurotransmitter - receptor;histamine receptor;H3;PET;H3
+galovic2021-ge179;neurotransmitter - receptor;glutamate receptor;NMDA;PET;NMDA
+hillmer2016-flubatine;neurotransmitter - receptor;acetylcholine receptor;a4b2;PET;a4b2
+jaworska2020-fallypride;neurotransmitter - receptor;dopamine receptor;D2;PET;D2_j
+kaller2017-sch23390;neurotransmitter - receptor;dopamine receptor;D1;PET;D1
+kantonen2020-carfentanil;neurotransmitter - receptor;mu-opioid receptor;MOR;PET;MOR
+lukow2022-ro154513;neurotransmitter - receptor;gabaa receptor, alpha5 subunit;GABAa_alpha5;PET;GABAa_alpha5
+malen2022-raclopride;neurotransmitter - receptor;dopamine receptor;D2;PET;D2_m
+naganawa2020-lsn3172176;neurotransmitter - receptor;acetylcholine receptor;M1;PET;M1
+norgaard2021-flumazenil;neurotransmitter - receptor;gabaa receptor;GABAa;PET;GABAa_n
+normandin2015-omar;neurotransmitter - receptor;cannabinoid receptor;CB1;PET;CB1
+radnakrishnan2018-gsk215083;neurotransmitter - receptor;serotonin receptor;5-HT6;PET;5-HT6
+rosaneto-abp688;neurotransmitter - receptor;glutamate receptor;mGluR5;PET;mGluR5_r
+savli2012-way100635;neurotransmitter - receptor;serotonin receptor;5-HT1a;PET;5-HT1a
+smart2019-abp688;neurotransmitter - receptor;glutamate receptor;mGluR5;PET;mGluR5_s
+smith2017-flb457;neurotransmitter - receptor;dopamine receptor;D2;PET;D2_s
+vijay2018-ly2795050;neurotransmitter - receptor;kappa-opioid receptor;KOR;PET;KOR
+neurotransmpc1;neurotransmitter - summary;pc1 neurotransmitter;ntpc1;;ntpc1
+aghourian2017-feobv;neurotransmitter - transporter;acetylcholine transporter;VAChT;PET;VAChT_a
+beliveau2017-dasb;neurotransmitter - transporter;serotonin transporter;5-HTT;PET;5-HTT_b
+ding2010-mrb;neurotransmitter - transporter;norepinephrine transporter;NET;PET;NET
+dukart2018-fpcit;neurotransmitter - transporter;dopamine transporter;DAT;PET;DAT_d
+fazio2016-madam;neurotransmitter - transporter;serotonin transporter;5-HTT;PET;5-HTT_f
+sasaki2012-fepe2i;neurotransmitter - transporter;dopamine transporter;DAT;PET;DAT_s
+savli2012-dasb;neurotransmitter - transporter;serotonin transporter;5-HTT;PET;5-HTT_s
+tuominen-feobv;neurotransmitter - transporter;acetylcholine transporter;VAChT;PET;VAChT_t
+;;;;;
+;;;;;
+;;;;;
+;;;;;
+;;;;;
+;;;;;
+;;;;;
