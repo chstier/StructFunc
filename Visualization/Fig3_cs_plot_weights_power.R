@@ -41,6 +41,7 @@ install.packages("dplyr")
 install.packages("tidyverse")
 install.packages("ggseg")
 install.packages("readxl")
+install.packages("scico")
 
 library(tidyverse)
 library(qgraph)
@@ -88,17 +89,17 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(viridis)
+library(scico)
 
 ############################### Plot with color-coding of the variable categories
 ##### set path 
 setwd('~/sciebo/Aging_multiv/')
 root = '~/sciebo/Aging_multiv/'
 res1 = 'Powadjusted_allselected_zscore_10ncomp_pls_noleak'
-res2 = 'maps_allselected_Powadjusted_zscore_10ncomp_noleak'
+res2 = 'maps_allselected_Powadjusted_zscore_10ncomp_noleak
 
-##### get PLS results 
-p = readMat(paste(root, 'results/PLS_allmaps/', res1, '.mat', sep=""))
-
+##### get PLS results
+p = readMat(paste(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_power/Mainanalyses_robustness/', res1, '.mat', sep=""))
 r2 = as.numeric(p$average.R2)
 rank = as.numeric(p$average.rank)
 vip = as.numeric(p$average.vip)
@@ -107,7 +108,7 @@ rmse_parcel = as.data.frame(array(unlist(p$rmse.parcel), dim = c(200, 50)))
 rmse_parcel = rowMeans(rmse_parcel)
 
 ##### get labels/classes (ranked and sorted accordingly)
-file = paste(root, 'results/PLS_allmaps/', res2, '.xlsx', sep="")
+file = paste(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_power/Mainanalyses_robustness/', res2, '.xlsx', sep="")
 labels = read_xlsx(file)
 labels = as.data.frame(labels)
 idx = (labels$class == 'microstructural - summary')
@@ -122,7 +123,7 @@ labels_orig = as.data.frame(labels_orig)
 labels_plot <- labels_orig[match(labels$annotation, labels_orig$annotation), ]
 
 ##################################################
-#### Prepare weights_long 
+#### Prepare weights_long exactly as before (unchanged)
 weights_sorted <- weights[order(vip, decreasing = TRUE), ]
 weights_sorted$map <- labels_plot$tags_plotting
 
@@ -132,8 +133,15 @@ weights_long <- weights_sorted %>%
 # convert "V1".."V60" -> numeric 1..60
 weights_long$frequency <- as.numeric(gsub("V", "", weights_long$frequency))
 
+# Preserve ordering exactly like your original code (top = first element)
+map_levels <- rev(unique(weights_sorted$map))   # keeps same ordering as before
+weights_long$map <- factor(weights_long$map, levels = map_levels)
+
 # Calculate max abs for color scale
 max_abs <- max(abs(weights_long$weight), na.rm = TRUE)
+
+# (assume weights_long and labels_plot were prepared earlier as in your pipeline)
+# weights_long has columns: map (factor with correct levels), frequency (numeric 1..60), weight
 
 # Ensure ordering exactly as before: top map is first in map_levels
 map_levels <- rev(unique(weights_sorted$map))
@@ -147,7 +155,7 @@ if (any(is.na(class_df$class))) warning("Some maps have no class mapping — che
 # palette and named colours
 palette_vec <- c("#a269b3","darkorange","#69b3a2","#e0ae09","#6baa58",
                  "#8a7a46","#697ab3","#699fb3","#926575","#b37d69","#4c3939")
-class_levels <- unique(class_df$class)
+class_levels <- sort(unique(class_df$class))          # was: unique(class_df$class)
 class_colors_named <- setNames(palette_vec[seq_along(class_levels)], class_levels)
 
 # compute label anchor and right-align labels so they don't enter heatmap
@@ -168,7 +176,9 @@ max_abs <- max(abs(weights_long$weight), na.rm = TRUE)
 p_combined <- ggplot() +
   # heatmap: discrete y using factor 'map'
   geom_tile(data = weights_long, aes(x = frequency, y = map, fill = weight), height = 1) +
-  scale_fill_viridis_c(name = "Beta weights", limits = c(-max_abs, max_abs)) +
+  #scale_fill_viridis_c(name = "Beta weights", limits = c(-max_abs, max_abs)) +
+  scale_fill_scico(palette = "bam", name = "Beta weights",
+                   limits = c(-max_abs, max_abs)) +  # symmetric limits -> 0 is the exact centre
   
   # coloured labels: right-align them (hjust = 1) and allow this layer to produce the Class legend
   geom_text(data = text_df, aes(x = x, y = map, label = map, color = class),
@@ -184,9 +194,10 @@ p_combined <- ggplot() +
   
   # color scale + legend styling: make class legend keys appear as filled squares
   scale_color_manual(name = "Categories", values = class_colors_named,
+                     limits = class_levels,
                      guide = guide_legend(override.aes = list(shape = 15, size = 5))) +
   
-  # x axis and y axis layout
+  # x axis and y axis Layout 
   scale_x_continuous(breaks = seq(5, 55, by = 5), expand = c(0,0)) +
   scale_y_discrete(expand = c(0,0)) +
   
@@ -210,10 +221,11 @@ p_combined <- ggplot() +
   labs(x = "Frequency (Hz)", y = "Predictor Map")
 
 # Save (same size as your original)
-outfile <- paste(root, 'results/PLS_allmaps/', res2, '_heatmap_all_fixed.png', sep = "")
+outfile <- paste(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_power/Mainanalyses_robustness/', res2, '_heatmap_all.png', sep = "")
 ggsave(outfile, p_combined, width = 10, height = 11, dpi = 300)
 
 p_combined
+
 
 
 
