@@ -1,16 +1,38 @@
-%% This script runs partial least squares regression to predict parcel-wise 
-% average MEG power from neurochemical/structural information 
+%% This script runs partial least squares regression (PLSR) to predict parcel-wise
+% average MEG power from neurochemical/structural information.
+%
+% Overview                                                                     
+%   1. Main model   : random 10-fold cross-validation (CV) across parcels
+%   2. Significance : spin test (spatial permutations of the maps), same CV
+%   3. Robustness   : distance-dependent CV (train on near, test on distant parcels)
+%   4. Stability    : parcel bootstrap of VIP scores and PLS coefficients
+%   5. Summary table and figure
+% Steps 3-4 use pls_uncertainty.m
+% Required functions: cvR2_pls.m, distcv_pls.m, bootVIP_pls.m,
+%                     pls_uncertainty.m, plsBetaBoot.m, spin_test_old.m
+% CS 2026
 
-% CS 2024/25
+%% Settings
+kfold = 10;
+ncomp = 10;          % number of components for partial least squares (PLS)
+nRep  = 50;          % CV repetitions (observed model AND every spin)
+nSpin = 1000;
+seed  = 1234;
+baselinetype  = 'zscore';
+trainFraction = 0.75;     % distance CV: nearest 75% train, most distant 25% test   
+nBoot         = 10000;    % parcel bootstrap resamples                             
+centroidFile  = 'Schaefer2018_200Parcels_7Networks_order_FSLMNI152_1mm.Centroid_RAS.csv'; 
+permFile      = 'spin_permid_schaefer200.mat';   % same spins for all analyses     
 
 %% Load neurochemical/structual maps
 load('allmaps_concat2_selected.mat')
 
 % Don't zscore globally, but do so in CV loop - keep raw maps
 X_raw = double(allmaps);   % original predictors (200 x nMaps)
+feats = 1:size(X_raw,2);   % use all maps
+labels = string(all_labels{:,1});                                                
 
 %% Get MEG data
-% start with the power spectrum
 % here adjusted for age, age2, sex, tiv:
 load('adjusted_MEGpower_orig.mat') 
 power_sorted = all_adj;
@@ -18,260 +40,142 @@ power_sorted = all_adj;
 % get average values (parcel x freq)
 gpowav = squeeze(mean(power_sorted, 1)); 
 
-% per-parcel normalization across frequencies and log.
+% per-parcel normalization across frequencies and log (log relative power)
 Y_raw = log(gpowav ./ repmat(mean(gpowav,2),1,60)); % (200 x 60)
-% Keep Y_raw for saving/inspection later
-Y = Y_raw;  % store full raw version (non-normalized across-parcels)
 
-% Choose normalization method to compare (will be applied within-fold using training stats)
-baselinetype = 'zscore'; 
-
-%% Now do a quick check on predictive performance (on full data for exploratory PCTVAR)
-% do z-scoring beforehand
-allmapsz=zscore(double(allmaps),0,1);
-
-% Use unscaled X_raw and Y_raw for this exploratory PLS (plsregress will center internally)
-[xl,yl,XS,YS,beta,PCTVAR,mse,stat]=plsregress(allmapsz,Y_raw,30); % assume 30 components
+%% Quick check on explained variance (full data, exploratory)
+allmapsz = zscore(double(allmaps),0,1);
+[xl,yl,XS,YS,beta,PCTVAR,mse,stat] = plsregress(allmapsz,Y_raw,30); % 30 components
 figure
 plot(cumsum(100*PCTVAR(2,:)),'-bo');
 xlabel('Number of PLS components');
 ylabel('Percent Variance Explained in y'); % exploratory
 
-%% Predict MEG power, compute ranks using ncomp
-kfold=10;
-ncomp=10; %number of components for partial least squares (PLS)
+%% 1. Main model: cross-validated PLS (R2, VIP, ranks, betas)
+rng(seed);
+[average_R2, average_vip, average_rank, det] = ...
+    cvR2_pls(feats, X_raw, Y_raw, ncomp, kfold, nRep, baselinetype);
 
-% We'll use X_raw and Y_raw and perform per-fold standardization inside the loop
-Y1=zeros(size(Y_raw));
+R2_all       = det.R2_rep;
+medrank      = det.medrank_rep;
+parcel_rank  = det.parcel_rank;
+beta_all     = det.beta_all;                 % reps x (1+nMaps) x freqs, intercept included
+rmse_parcel  = det.rmse_parcel;
+rmse_matrix  = det.rmse_matrix;
+Y1           = det.Y_pred_last;              % predictions of the last repetition
 
-for rep=1:50
-
-    cv = cvpartition(200,"Kfold",kfold);
-    Y1=zeros(size(Y_raw));
-    vipScore = nan(size(X_raw,2),kfold);
-    b = nan(kfold, size(X_raw,2)+1, size(Y_raw,2)); % store betas per fold
-
-    for ifold=1:kfold
-        tr = cv.training(ifold);
-        te = cv.test(ifold);
-
-        %% STANDARDIZE X using training data stats
-        muX = mean(X_raw(tr,:),1);
-        sigmaX = std(X_raw(tr,:),0,1);
-        sigmaX(sigmaX==0) = 1;  % avoid division by zero
-        Xtrain = (X_raw(tr,:) - muX) ./ sigmaX;
-        Xtest  = (X_raw(te,:)  - muX) ./ sigmaX;
-
-        %% NORMALIZE Y using training data stats (according to baselinetype)
-        Ytrain_raw = Y_raw(tr,:);   % training parcels x freq
-        Ytest_raw  = Y_raw(te,:);   % test parcels x freq
-
-        % Compute the mean power across parcels (rows) for each frequency (columns)
-        meanVals = repmat(mean(Ytrain_raw, 1), size(Ytrain_raw,1), 1);
-        
-        switch baselinetype
-            case 'zscore'
-                % compute mean & std across parcels *from training set only*, per frequency
-                meanFreq = repmat(mean(Ytrain_raw,1), size(Ytrain_raw,1), 1);
-                stdFreq  = repmat(std(Ytrain_raw,0,1), size(Ytrain_raw,1), 1);
-%                 stdFreq(stdFreq==0) = 1;
-                Ytrain = (Ytrain_raw - meanFreq) ./ stdFreq;
-
-                % apply training mean & std to test
-                meanFreq_test = repmat(mean(Ytrain_raw,1), size(Ytest_raw,1), 1);
-                stdFreq_test  = repmat(std(Ytrain_raw,0,1), size(Ytest_raw,1), 1);
-                % stdFreq_test(stdFreq_test==0) = 1;
-                Ytest = (Ytest_raw - meanFreq_test) ./ stdFreq_test;
-
-            otherwise
-                error('Unsupported method for baseline normalization: %s', baselinetype);
-        end
-
-        %% Fit PLS on training set (note: Ytrain used here)
-        [XL,yl,XS,YS,beta,PCTVAR,mse,stats] = plsregress(Xtrain, Ytrain, ncomp);
-        b(ifold,:,:) = beta; % store betas for this fold
-
-        % predict on test set; predictions are in normalized Y-space (if Y was normalized)
-        Ypred_norm = [ones(sum(te),1), Xtest] * beta;
-
-        % If Y was normalized, bring predictions back into original Y units before storing
-        switch baselinetype
-            case 'db'
-                % Ypred_norm already in dB units because we created Ytrain that way.
-                Y1(te,:) = Ypred_norm;
-            otherwise
-                % For absolute/relative/relchange/zscore, convert back to original Y_raw units where needed
-                if strcmp(baselinetype,'zscore')
-                    % inverse zscore: Y = Ypred_norm .* stdFreq_train + meanFreq_train
-                    meanFreq_train = mean(Ytrain_raw,1);
-                    stdFreq_train  = std(Ytrain_raw,0,1);
-                    stdFreq_train(stdFreq_train==0)=1;
-                    Y1(te,:) = Ypred_norm .* repmat(stdFreq_train, sum(te),1) + repmat(meanFreq_train, sum(te),1);
-                elseif strcmp(baselinetype,'absolute')
-                    meanFreq_train = mean(Ytrain_raw,1);
-                    Y1(te,:) = Ypred_norm + repmat(meanFreq_train, sum(te),1);
-                elseif strcmp(baselinetype,'relative')
-                    meanFreq_train = mean(Ytrain_raw,1);
-                    Y1(te,:) = (Ypred_norm + 1) .* repmat(meanFreq_train, sum(te),1);
-                elseif strcmp(baselinetype,'relchange')
-                    meanFreq_train = mean(Ytrain_raw,1);
-                    Y1(te,:) = (Ypred_norm .* repmat(mean(Ytrain_raw,1), size(Ypred_norm,1),1)) + repmat(mean(Ytrain_raw,1), size(Ypred_norm,1),1);
-                else
-                    % fallback: treat as no inverse transform (should not happen)
-                    Y1(te,:) = Ypred_norm;
-                end
-        end
-
-        % normalized PLS weights for each fold
-        W0 = stats.W ./ sqrt(sum(stats.W.^2,1));
-
-        % VIP scores for ncomp and fold
-        p = size(XL,1);
-        sumSq = sum(XS.^2,1).*sum(yl.^2,1);
-        vipScore(:, ifold) = sqrt(p* sum(sumSq.*(W0.^2),2) ./ sum(sumSq,2));       
-    end % ifold
-
-    beta_all(rep,:,:) =  squeeze(mean(b, 1)); % intercept is there!
-    all_vip(:,rep) = mean(vipScore,2);
-
-    % compute metrics across folds
-    mean_obs = mean(Y_raw);  % use raw Y (original units) for R2 denominator
-    r2 = 1-(mean((Y_raw-Y1).^2)/(mean((Y_raw-mean_obs).^2)));
-    R2_all(rep) = r2;
-
-    % Compute RMS error per parcel for this repetition
-    rmse_parcel(:,rep) = sqrt(mean((Y1 - Y_raw).^2, 2))';  % size: [200 x 1]
-    % RMS for each frequency bin and parcel
-    rmse_matrix(rep,:,:) = sqrt((Y1 - Y_raw).^2);
-
-    r=corr(Y_raw',Y1'); % compute r
-
-    % median rank
-    for k0=1:200
-        r_rank(k0,:)=tiedrank(r(k0,:));
-    end
-    parcel_rank(:,rep) = diag(r_rank);
-    medrank(rep)=(median(diag(r_rank)));
-
-end % rep
-
-average_R2 = mean(R2_all);
-average_rank = mean(medrank);
 average_parcelrank = mean(parcel_rank,2);
-average_vip = mean(all_vip,2);
-average_weights = squeeze(mean(beta_all(:,2:end,:),1));
+average_weights    = squeeze(mean(beta_all(:,2:end,:),1));
 
+fprintf('CV R2 = %.3f, median rank = %.1f\n', average_R2, average_rank);
 
-% load labels for the maps
+%% Save VIP ranking and prediction results
 [VIPs,I] = sort(average_vip, 'descend');
-selected = all_labels(I,:);
-maps_selected = selected;
-
-% save important maps
+maps_selected = all_labels(I,:);
 maps_selected.scores = VIPs;
 maps_selected.predvariable = repmat('Pow_10ncomp',length(VIPs),1);
-
 writetable(maps_selected, 'maps_allselected_Powadjusted_zscore_10ncomp_noleak.xlsx')
 
-% save prediction results (save Y_raw as Y to keep naming similar)
 Y = Y_raw;
 save('Powadjusted_allselected_zscore_10ncomp_pls_noleak.mat', 'average_R2', 'average_rank', ...
     'average_vip', 'average_weights', 'beta_all', 'maps_selected', 'parcel_rank', 'rmse_matrix', 'rmse_parcel')
 
-save('orig_pred_powspctrm_allselected_zscore_10ncomp_noleak.mat', 'Y', 'Y1')
+Y1z = det.Y_pred_norm_last;   % predicted, z-scored per lag (fold-specific training stats)
+Yz  = det.Y_true_norm_last;   % observed,  z-scored per lag (same stats)
+save('orig_pred_powspctrm_allselected_zscore_10ncomp_noleak.mat', 'Y', 'Y1','Yz', 'Y1z')
 
-%% Now create 0 distribution using spin-tests (updated to avoid leakage)
-% do spin test to get a null distribution
-[p_spin, r_dist, permid] = spin_test_old(rand(1,200),rand(1,200), 'parcellation_name','schaefer_200');
-
-kfold=10;
-cv = cvpartition(200,"Kfold",kfold);
-Y1=zeros(size(Y_raw));
-
-for k=1:1000
-  % Permute rows of X_raw according to spin permutation
-  Xperm = X_raw(permid(:,k),:);
-
-  % Reset Y1 for this spin
-  Y1=zeros(size(Y_raw));
-
-  for ifold=1:kfold
-      tr = cv.training(ifold);
-      te = cv.test(ifold);
-
-      % standardize permuted X using training data from permuted X
-      muX = mean(Xperm(tr,:),1);
-      sigmaX = std(Xperm(tr,:),0,1);
-      sigmaX(sigmaX==0)=1;
-      Xtrain = (Xperm(tr,:) - muX) ./ sigmaX;
-      Xtest  = (Xperm(te,:)  - muX) ./ sigmaX;
-
-      % standardize Y using training data (same as before)
-      Ytrain_raw = Y_raw(tr,:);
-      Ytest_raw  = Y_raw(te,:);
-      switch baselinetype
-          case 'zscore'
-              meanFreq = repmat(mean(Ytrain_raw,1), size(Ytrain_raw,1), 1);
-              stdFreq  = repmat(std(Ytrain_raw,0,1), size(Ytrain_raw,1), 1);
-              stdFreq(stdFreq==0)=1;
-              Ytrain = (Ytrain_raw - meanFreq) ./ stdFreq;
-              meanFreq_test = repmat(mean(Ytrain_raw,1), size(Ytest_raw,1), 1);
-              stdFreq_test  = repmat(std(Ytrain_raw,0,1), size(Ytest_raw,1), 1);
-              stdFreq_test(stdFreq_test==0)=1;
-              Ytest = (Ytest_raw - meanFreq_test) ./ stdFreq_test;
-          otherwise
-              % for spins, implement same handling as above if needed (here we keep zscore typical)
-              meanFreq = repmat(mean(Ytrain_raw,1), size(Ytrain_raw,1), 1);
-              stdFreq  = repmat(std(Ytrain_raw,0,1), size(Ytrain_raw,1), 1);
-              stdFreq(stdFreq==0)=1;
-              Ytrain = (Ytrain_raw - meanFreq) ./ stdFreq;
-              meanFreq_test = repmat(mean(Ytrain_raw,1), size(Ytest_raw,1), 1);
-              stdFreq_test  = repmat(std(Ytrain_raw,0,1), size(Ytest_raw,1), 1);
-              stdFreq_test(stdFreq_test==0)=1;
-              Ytest = (Ytest_raw - meanFreq_test) ./ stdFreq_test;
-      end
-
-      % build PLS on training set (perm)
-      [xl,yl,XS,YS,beta,PCTVAR,mse,stat]=plsregress(Xtrain,Ytrain,ncomp);
-
-      % predict power in test parcels (back-transform to original Y units if needed)
-      Ypred_norm = [ones(sum(te),1), Xtest] * beta;
-      % inverse transform (zscore case)
-      meanFreq_train = mean(Ytrain_raw,1);
-      stdFreq_train  = std(Ytrain_raw,0,1);
-      stdFreq_train(stdFreq_train==0)=1;
-      Y1(te,:) = Ypred_norm .* repmat(stdFreq_train, sum(te),1) + repmat(meanFreq_train, sum(te),1);
-  end
-
-  mean_obs = mean(Y_raw);
-  rsqsh(k) = 1-(mean((Y_raw-Y1).^2)/(mean((Y_raw-mean_obs).^2)));
-
-  r=corr(Y_raw',Y1');
-  for k0=1:200
-     r_rank(k0,:)=tiedrank(r(k0,:));
-  end
-  spin_parcel_rank(:,k) = diag(r_rank);
-  spin_medrank(k)=(median(diag(r_rank)));
+%% 2. Significance: spin test (same function and settings as observed model)
+% Spins are generated once with a fixed seed and saved, so that all analyses   
+% (power, AC, age maps, distance CV) use identical spatial permutations.
+if isfile(permFile)                                                            
+    load(permFile, 'permid');
+else
+    rng(seed);
+    [~, ~, permid] = spin_test_old(rand(1,200), rand(1,200), 'parcellation_name','schaefer_200');
+    save(permFile, 'permid');
 end
+nSpin = min(nSpin, size(permid,2));                                            
 
-results_single_spin.rsqsh_spin = rsqsh;
-clear r rsqsh
+rsqsh        = zeros(nSpin,1);
+spin_medrank = zeros(nSpin,1);
+vip_spin     = zeros(nSpin, numel(feats));                                   
+parfor k = 1:nSpin
+    rng(seed + k);
+    [r2k, vipk, rankk] = cvR2_pls(feats, X_raw(permid(:,k),:), Y_raw, ncomp, kfold, nRep, baselinetype);  
+    rsqsh(k) = r2k;  spin_medrank(k) = rankk;  vip_spin(k,:) = vipk';         
+end
+results_single_spin.rsqsh_spin   = rsqsh;
+results_single_spin.spin_medrank = spin_medrank;
 
-spin_99prctile = prctile(results_single_spin.rsqsh_spin, 99);
+spin_99prctile      = prctile(rsqsh, 99);
 spin_99prctile_rank = prctile(spin_medrank, 99);
-pval_single=length(find(abs(results_single_spin.rsqsh_spin)>abs(average_R2)))/1000;
-pval_medrank=length(find(abs(spin_medrank)>abs(average_rank)))/1000;
+pval_single  = (1 + sum(rsqsh        >= average_R2))   / (nSpin + 1);   % one-sided
+pval_medrank = (1 + sum(spin_medrank >= average_rank)) / (nSpin + 1);   % one-sided
+pval_vip     = (1 + sum(vip_spin >= average_vip', 1))' / (nSpin + 1);   % one-sided, per map  
+qval_vip     = bh_fdr(pval_vip);                                        % FDR across maps    
+fprintf('spin p: R2 = %.4f, rank = %.4f; %d maps with VIP spin-FDR < .05\n', ...
+        pval_single, pval_medrank, nnz(qval_vip < .05));                                   
 
 % add significance test using spins
 save('Powadjusted_allselected_zscore_10ncomp_pls_noleak.mat', 'average_R2', 'average_rank', ...
     'average_vip', 'average_weights', 'beta_all', 'maps_selected', 'parcel_rank', 'rmse_matrix', 'rmse_parcel',...
-    'results_single_spin', 'pval_single', 'pval_medrank', 'spin_99prctile_rank')
+    'results_single_spin', 'pval_single', 'pval_medrank', 'spin_99prctile_rank', ...
+    'pval_vip', 'qval_vip')                                                                
 
-%% Check regional predictability
-% Pearson r per parcel (shape similarity)
-r_parcel = nan(200,1);
-for p=1:size(Y_raw,1)
-    r_parcel(p) = corr(Y_raw(p,:)', Y1(p,:)','Rows','complete');
+%% 3.-4. Robustness (distance-dependent CV) and stability (parcel bootstrap)    
+% Identical to the age-map analysis (pls_uncertainty.m):
+%  (a) Distance-dependent CV: each of the 200 parcels serves once as seed; the
+%      75% of parcels nearest to it train the model, the 25% most distant are
+%      predicted. Significance: spin null (maps rotated, splits kept fixed).
+%      The 200 splits overlap, so their spread is a robustness range, not a CI.
+%  (b) Parcel bootstrap: parcels resampled with replacement and PLS refitted
+%      -> 95% CI of VIP scores and ranks, P(VIP > 1), P(top 10).
+Tc     = readtable(centroidFile, 'VariableNamingRule', 'preserve');
+coords = [Tc.R, Tc.A, Tc.S];             % parcel centroids, same order as maps
+assert(size(coords,1) == size(X_raw,1), 'Centroids and maps differ in parcel number.');
+
+opt = struct('ncomp', ncomp, 'baselinetype', baselinetype, 'trainFraction', trainFraction, ...
+             'nSpin', nSpin, 'nBoot', nBoot, 'seed', seed);
+U = pls_uncertainty(X_raw, Y_raw, coords, permid, opt);
+
+% PLS coefficients (heatmap) with parcel-bootstrap 95% CI, as in the age-map analysis
+B = plsBetaBoot(X_raw, Y_raw, ncomp, nBoot, seed, baselinetype);
+
+%% 5. Summary: VIP ranking with significance, robustness and stability     
+vipTab = table(labels, average_vip, pval_vip, qval_vip, ...
+    U.boot.ci(:,1), U.boot.ci(:,2), U.boot.pVIPgt1, U.boot.pTop10, ...
+    U.dist.vip, U.dist.qVIP, U.dist.rankMed, U.dist.pTop10, ...
+    'VariableNames', {'Map','VIP','pSpin','qFDR', ...
+    'VIP_boot_lo','VIP_boot_hi','P_VIPgt1_boot','P_top10_boot', ...
+    'VIP_dist','qFDR_dist','Rank_dist_med','P_top10_dist'});
+vipTab = sortrows(vipTab, 'VIP', 'descend');
+disp(vipTab(1:15,:));
+writetable(vipTab, 'maps_allselected_Powadjusted_zscore_10ncomp_robustness.xlsx')
+
+fprintf('\nSummary (power)\n');
+fprintf('  Random CV  : R2 = %.3f (p_spin = %.4f), median rank %.1f of 200\n', ...
+        average_R2, pval_single, average_rank);
+fprintf('  Distance CV: R2 = %.3f (p_spin = %.4f; splits 5-95%%: %.2f to %.2f; test-mean baseline: %.3f)\n', ...
+        U.dist.R2_pooled, U.dist.pR2, U.dist.R2_p5_p95, U.dist.R2_pooled_testmean);
+fprintf('  Bootstrap  : %d maps with VIP > 1 in >= 95%% of resamples\n', nnz(U.boot.pVIPgt1 >= .95));
+
+save('Powadjusted_allselected_zscore_10ncomp_pls_noleak.mat', ...
+     'U', 'B', 'vipTab', 'opt', 'permid', '-append')
+
+% VIP with 95% bootstrap CI (supplementary figure)
+figure('Color','w','Position',[50 50 1400 400]);
+[~, o] = sort(average_vip, 'descend');
+plot([1:numel(o); 1:numel(o)], U.boot.ci(o,:)', 'k-'); hold on
+plot(1:numel(o), average_vip(o), 'o', 'MarkerFaceColor', 'r'); yline(1, '--');
+set(gca, 'XTick', 1:numel(o), 'XTickLabel', labels(o), 'FontSize', 6); xtickangle(60);
+ylabel('VIP (95% bootstrap CI)'); title('Power: VIP scores with parcel-bootstrap CI');
+exportgraphics(gcf, 'Pow_VIP_bootCI.png', 'Resolution', 200);
+
+%% local functions
+function q = bh_fdr(p)           % Benjamini-Hochberg FDR
+p = p(:); m = numel(p); [ps, idx] = sort(p);
+qs = min(1, flipud(cummin(flipud(ps .* m ./ (1:m)'))));
+q = nan(m,1); q(idx) = qs;
 end
 
 
