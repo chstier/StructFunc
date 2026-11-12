@@ -1,4 +1,4 @@
-### This script plots the PLSR beta weights for time lage (MEG autocorrelation)
+### This script plots the PLSR beta weights for time lags (MEG autocorrelation)
 ### Christina Stier, 2025
 
 ## R version 4.2.2 (2022-10-31)
@@ -41,6 +41,7 @@ install.packages("dplyr")
 install.packages("tidyverse")
 install.packages("ggseg")
 install.packages("readxl")
+install.packages("scico")
 
 library(tidyverse)
 library(qgraph)
@@ -83,16 +84,17 @@ library(tidymodels)
 library(readxl)
 library(hrbrthemes)
 library(viridis)
+library(scico)
 
 ##### set path
 setwd('~/sciebo/Aging_multiv/')
 root = '~/sciebo/Aging_multiv/'
-res1 = 'ACall_allselected_10ncomp_pls_noleak'
-res2 = 'maps_allselected_ACall_10ncomp_noleak'
+res1 = 'ACall_allselected_zscore_10ncomp_pls_noleak'
+res2 = 'maps_allselected_ACall_zscore_10ncomp_noleak'
 
 ############################### Plot with color-coding of the variable categories
 ##### get PLS results
-p = readMat(paste(root, 'results/PLS_AC/ACall/', res1, '.mat', sep=""))
+p = readMat(paste(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_AC/Mainanalyses_robustness/', res1, '.mat', sep=""))
 
 r2 = as.numeric(p$average.R2)
 rank = as.numeric(p$average.rank)
@@ -102,7 +104,7 @@ rmse_parcel = as.data.frame(array(unlist(p$rmse.parcel), dim = c(200, 50)))
 rmse_parcel = rowMeans(rmse_parcel)
 
 ##### get labels/classes (ranked and sorted accordingly)
-file = paste(root, 'results/PLS_AC/ACall/', res2, '.xlsx', sep="")
+file = paste(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_AC/Mainanalyses_robustness/', res2, '.xlsx', sep="")
 labels = read_xlsx(file)
 labels = as.data.frame(labels)
 idx = (labels$class == 'microstructural - summary')
@@ -116,7 +118,9 @@ labels_orig = as.data.frame(labels_orig)
 # reorder plotting label according to the results
 labels_plot <- labels_orig[match(labels$annotation, labels_orig$annotation), ]
 
-## Build weights_long 
+# -------------------------
+# 2) Build weights_long 
+# -------------------------
 weights_sorted <- weights[order(vip, decreasing = TRUE), ]
 
 # attach plotting-friendly map names from labels_plot
@@ -135,7 +139,6 @@ ms = round(ms, digits = 1)
 time = as.factor(ms)
 
 # Make sure 'map' is a factor with desired order
-#weights_long$map <- factor(weights_long$map, levels = rev(unique(weights_sorted$map)))
 weights_long$AClag <- factor(weights_long$AClag, levels = unique(weights_long$AClag))
 weights_long$AClag <- as.numeric(gsub("V", "", weights_long$AClag))
 weights_long$time <- rep(time,55)
@@ -147,22 +150,36 @@ weights_long$map <- factor(weights_long$map, levels = map_levels)
 # compute max abs for colour scale (safe to set as scale limits)
 max_abs <- max(abs(weights_long$weight), na.rm = TRUE)
 
-## FIXED named palette 
+# -------------------------
+# 3) FIXED named palette (important: reuse this across all runs)
+#    Replace or reorder names/hex codes as you like. These names MUST
+#    exactly match the strings in labels_plot$class (or be canonicalised).
+# -------------------------
+# fixed, named palette: category name -> color
 class_palette <- c(
-  "cortical expansion"           = "#69b3a2",
-  "gene expression - summary"    = "#4c3939",
-  "gradient - summary"           = "#b37d69",
-  "metabolism"                   = "#a269b3",
-  "microstructural"              = "#6baa58",
-  "network-metrics"              = "#926575",
-  "neurotransmitter - enzyme"    = "#699fb3",
-  "neurotransmitter - protein"   = "#8a7a46",
-  "neurotransmitter - receptor"  = "#e0ae09",
-  "neurotransmitter - summary"   = "#697ab3",
-  "neurotransmitter - transporter" = "darkorange"
-)
+  "cortical expansion"             = "#a269b3",
+  "gene expression - summary"      = "darkorange",
+  "gradient - summary"             = "#69b3a2",
+  "metabolism"                     = "#e0ae09",
+  "microstructural"                = "#6baa58",
+  "network-metrics"                = "#8a7a46",
+  "neurotransmitter - enzyme"      = "#697ab3",
+  "neurotransmitter - protein"     = "#699fb3",
+  "neurotransmitter - receptor"    = "#926575",
+  "neurotransmitter - summary"     = "#b37d69",
+  "neurotransmitter - transporter" = "#4c3939")
+# reorder or rename entries above to exactly match the labels$class canonical names you use.
 
-# build class mapping
+
+# If your labels use slightly different strings (e.g., "microstructural - summary"),
+# canonicalize them here BEFORE joining. Example:
+# labels_plot$class[labels_plot$class == "microstructural - summary"] <- "microstructural"
+# (You already did a version of this earlier — ensure final names match class_palette keys.)
+
+# -------------------------
+# 4) Build a class mapping that explicitly joins map -> class (robust)
+# -------------------------
+# labels_plot must contain at least columns: tags_plotting (map names) and class
 class_map_df <- data.frame(map = labels_plot$tags_plotting, class = labels_plot$class, stringsAsFactors = FALSE)
 
 class_df <- data.frame(map = map_levels, stringsAsFactors = FALSE) %>%
@@ -188,8 +205,16 @@ text_df <- class_df %>%
 # ensure text_df$class is factor with same levels as palette
 text_df$class <- factor(as.character(text_df$class), levels = names(class_palette))
 
+# -------------------------
+# 5) Construct the plot
+# -------------------------
+# convert from lags to time-axis (ms)
+# v = (1:40)
+# ms = (v/300)*1000  
+# ms = round(ms, digits = 1)
+# time = as.factor(ms)
 
-## Plot
+
 p_combined <- ggplot() +
   
   # main heatmap (discrete y = factor map)
@@ -198,7 +223,9 @@ p_combined <- ggplot() +
             height = 1) +
   
   # continuous colour for weights (we allow symmetric range from data)
-  scale_fill_viridis_c(name = "Beta weights", limits = c(-max_abs, max_abs)) +
+  # scale_fill_viridis_c(name = "Beta weights", limits = c(-max_abs, max_abs)) +
+  scale_fill_scico(palette = "bam", name = "Beta weights",
+                   limits = c(-max_abs, max_abs)) +  # symmetric limits -> 0 is the exact centre
   
   # coloured labels (right-aligned so they sit left of the tiles)
   geom_text(data = text_df,
@@ -241,7 +268,7 @@ p_combined <- ggplot() +
   )
 
 # Save output (adjust file name if desired)
-outfile <- paste0(root, 'results/PLS_AC/ACall/', res2, '_heatmap_all_fixed_palette.png')
+outfile <- paste0(root, 'results/PLS_allmaps_Oct26/PLS_allmaps_AC/Mainanalyses_robustness/', res2, '_heatmap_all_fixed_palette.png')
 ggsave(outfile, p_combined, width = 10, height = 11, dpi = 300)
 
 # also show in the active R session
