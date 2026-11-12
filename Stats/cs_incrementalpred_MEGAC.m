@@ -1,5 +1,5 @@
 %% This script does forward selection of neurochemical/structural maps
-% based on best CV R² at each step
+% based on best CV R^2 at each step (AC; cvR2_pls.m, same as main analyses)
 
 % CS 2025
 
@@ -17,18 +17,18 @@ X_raw = double(allmaps);   % original predictors (200 x nMaps)
 % adjusted for age, sex, icv
 load('adjusted_MEGACall_sorted.mat')
 
-% get average values (parcel x freq)
+% get average values (parcel x lag)
 gACav = squeeze(mean(all_adj, 1));
 Y_raw = gACav;
 
 Y = Y_raw;
 
-% % Choose normalization method to compare (will be applied within-fold using training stats)
-% baselinetype = 'absolute'; 
-
+% normalization within folds: subtract training mean per lag (as AC main analysis)
+baselinetype = 'zscore';                              
 
 kfold = 10;
 reps_cv = 50;
+seed = 1234;                                              
 max_feats = size(X_raw,2);  % total number of maps
 
 selected_maps = [];
@@ -52,9 +52,9 @@ for step = 1:max_feats
         candidate = [selected_maps, m];
         ncomp = ceil(numel(candidate) / 5);  % increase components gradually
 
-        % Now cvR2_pls returns both r2 and mean_vip (VIPs averaged across CV)
-        % Pass X_raw and baselinetype
-        [r2, mean_vip] = cvR2_pls_ACall(candidate, X_raw, Y_raw, ncomp, kfold, reps_cv);
+        % cvR2_pls returns CV R^2 and VIPs (averaged across folds & reps)
+%         rng(seed);                                                                   
+        [r2, mean_vip] = cvR2_pls(candidate, X_raw, Y_raw, ncomp, kfold, reps_cv, baselinetype); 
 
         if r2 > best_r2
             best_r2 = r2;
@@ -76,7 +76,7 @@ for step = 1:max_feats
         added_labels(step) = string(all_labels.annotation(best_map, :));
     end
 
-    fprintf('Step %d: Added map %d ? CV R^2 = %.4f (ncomp = %d)\n', ...
+    fprintf('Step %d: Added map %d -> CV R^2 = %.4f (ncomp = %d)\n', ...      
         step, best_map, best_r2, ncomp_list(step));
     fprintf('Step %d: Remaining maps = %d\n', step, numel(remaining_maps));
 end
@@ -93,7 +93,7 @@ plot(1:max_feats, ncomp_list, '--x', 'Color', [0.4 0.4 0.4]);
 ylabel('# PLS Components');
 
 xlabel('Number of Maps Added');
-title('Forward Selection: CV R^2 vs. Added Maps');
+title('Forward Selection (AC): CV R^2 vs. Added Maps');
 grid on;
 
 %% Save results
@@ -103,5 +103,6 @@ T = table(added_maps(:), ...
           ncomp_list(:), ...
           'VariableNames', {'MapIndex', 'MapLabel', 'CV_R2', 'NumComponents'});
 
-writetable(T, 'forward_selection_results.csv');
-fprintf('Results saved to forward_selection_results.csv\n');
+writetable(T, 'forward_selection_results_AC.csv');                        
+save('forward_selection_AC.mat', 'T', 'selected_vips');                
+fprintf('Results saved to forward_selection_results_AC.csv\n');
